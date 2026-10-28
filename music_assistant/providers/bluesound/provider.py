@@ -10,6 +10,7 @@ from music_assistant.helpers.util import (
     get_mac_address,
     get_port_from_zeroconf,
     get_primary_ip_address_from_zeroconf,
+    is_ipv6_address,
 )
 from music_assistant.models.player_provider import PlayerProvider
 
@@ -35,6 +36,7 @@ class BluesoundPlayerProvider(PlayerProvider):
     """Bluos compatible player provider, providing support for bluesound speakers."""
 
     player_map: ClassVar[dict[tuple[str, int], str]] = {}
+    _zone_macs: dict[str, str]
 
     async def get_config_entries(self) -> tuple[ConfigEntry, ...]:
         """Set up legacy BluOS devices."""
@@ -42,6 +44,7 @@ class BluesoundPlayerProvider(PlayerProvider):
 
     async def handle_async_init(self) -> None:
         """Handle async initialization of the provider."""
+        self._zone_macs = {}
 
     async def on_mdns_service_state_change(
         self, name: str, state_change: ServiceStateChange, info: AsyncServiceInfo | None
@@ -61,9 +64,15 @@ class BluesoundPlayerProvider(PlayerProvider):
             return
 
         player_id: str | None
+        mac_address: str | None
         if info.type == MUSP_MDNS_TYPE:
-            # this is a multi-zone device, we need to fetch the mac address of the main device
-            mac_address = await get_mac_address(ip_address)
+            # this is a multi-zone device, we need to fetch the mac address of the main device.
+            # That lookup only works over IPv4, so an IPv6-only announcement of a known zone
+            # reuses the mac address found for it before.
+            if is_ipv6_address(ip_address):
+                mac_address = self._zone_macs.get(info.name)
+            else:
+                mac_address = await get_mac_address(ip_address)
             player_id = f"{mac_address}:{port}"
         else:
             mac_address = info.decoded_properties.get("mac")
@@ -78,19 +87,26 @@ class BluesoundPlayerProvider(PlayerProvider):
 
         # Handle update of existing player
         assert player_id is not None  # for type checker
+        if info.type == MUSP_MDNS_TYPE:
+            self._zone_macs[info.name] = mac_address
         if bluos_player := self.mass.players.get_player(player_id):
             bluos_player = cast("BluesoundPlayer", bluos_player)
-            # Check if the IP address has changed
-            if ip_address and ip_address != bluos_player.ip_address:
-                self.logger.debug(
-                    "IP address for player %s updated to %s", bluos_player.name, ip_address
-                )
-            else:
-                # IP address not changed
-                self.logger.debug("Player back online: %s", bluos_player.name)
+            # An announcement that only carries an IPv6 address (e.g. while the device
+            # re-announces after a network blip) does not move a player known at an IPv4
+            # address: BluOS groups players by their IPv4 address.
+            if ip_address == bluos_player.ip_address or (
+                is_ipv6_address(ip_address) and not is_ipv6_address(bluos_player.ip_address)
+            ):
+                # Refresh the player at the address it already has
                 bluos_player._attr_available = True
                 await bluos_player.update_attributes()
+                if bluos_player._attr_available:
+                    self.logger.debug("Player back online: %s", bluos_player.name)
                 return
+            self.logger.debug(
+                "IP address for player %s updated to %s", bluos_player.name, ip_address
+            )
+            self.player_map.pop((bluos_player.ip_address, bluos_player.port), None)
 
         # New player discovered
         self.logger.debug("Discovered player: %s", name)

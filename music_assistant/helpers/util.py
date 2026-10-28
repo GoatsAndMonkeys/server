@@ -1334,6 +1334,21 @@ def format_ip_for_url(ip_address: str) -> str:
     return ip_address
 
 
+def is_ipv6_address(address: str) -> bool:
+    """
+    Return True if the given address is an IPv6 address.
+
+    An IPv4-mapped IPv6 address (e.g. ::ffff:192.168.1.64) counts as IPv4.
+
+    :param address: The IP address to check.
+    """
+    try:
+        parsed = ip_address(address)
+    except ValueError:
+        return False
+    return isinstance(parsed, IPv6Address) and parsed.ipv4_mapped is None
+
+
 # mDNS, special-use (RFC 6761, RFC 8375, ICANN .internal) and common home router suffixes
 _LOCAL_NETWORK_SUFFIXES = (".local", ".localhost", ".home.arpa", ".internal", ".lan", ".home")
 

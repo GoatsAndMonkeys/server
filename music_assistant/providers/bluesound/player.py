@@ -19,7 +19,7 @@ from music_assistant.constants import (
     CONF_ENTRY_ICY_METADATA_DEFAULT_FULL,
     create_sample_rates_config_entry,
 )
-from music_assistant.helpers.util import is_valid_mac_address
+from music_assistant.helpers.util import format_ip_for_url, is_valid_mac_address
 from music_assistant.models.player import DeviceInfo, Player, PlayerMedia, PlayerSource
 from music_assistant.providers.bluesound.const import (
     IDLE_POLL_INTERVAL,
@@ -58,7 +58,9 @@ class BluesoundPlayer(Player):
         self.discovery_info = discovery_info
         self.ip_address = ip_address
         self.connected: bool = True
-        self.client = BluosPlayer(self.ip_address, self.port, self.mass.http_session)
+        self.client = BluosPlayer(
+            format_ip_for_url(self.ip_address), self.port, self.mass.http_session
+        )
         self.sync_status: SyncStatus
         self.status: Status
         self.poll_state = POLL_STATE_STATIC

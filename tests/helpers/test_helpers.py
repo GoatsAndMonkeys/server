@@ -387,6 +387,21 @@ def test_format_ip_for_url() -> None:
     assert util.format_ip_for_url("fd00::cafe:1") == "[fd00::cafe:1]"
 
 
+@pytest.mark.parametrize(
+    ("address", "expected"),
+    [
+        ("192.168.1.64", False),
+        ("::ffff:192.168.1.64", False),
+        ("fdec:7249:300f:4622:9256:82ff:fe41:be04", True),
+        ("::1", True),
+        ("not-an-ip", False),
+    ],
+)
+def test_is_ipv6_address(address: str, expected: bool) -> None:
+    """IPv4-mapped IPv6 addresses count as IPv4."""
+    assert util.is_ipv6_address(address) is expected
+
+
 def _mock_service_info(ipv4_addrs: list[str], ipv6_addrs: list[str]) -> MagicMock:
     """Create a mock AsyncServiceInfo with ip_addresses_by_version."""
     mock_info = MagicMock()
