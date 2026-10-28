@@ -275,6 +275,7 @@ class DLNAPlayer(Player):
         assert self.device is not None  # for type checking
         await self.device.async_play()
         self._pause_command_position = None
+        self._schedule_state_refresh()
 
     @catch_request_errors
     async def play_media(self, media: PlayerMedia) -> None:
@@ -923,9 +924,9 @@ class DLNAPlayer(Player):
         await self._update_player()
 
     def _schedule_state_refresh(self) -> None:
-        """Read the transport state back shortly after a skip or seek."""
-        # many devices send no event for these, which would leave the old track and
-        # position on display until the next regular poll
+        """Read the transport state back shortly after a resume, skip or seek."""
+        # many devices send no event for these, which would leave the old state, track
+        # and position on display until the next regular poll
         for index, delay in enumerate(COMMAND_REFRESH_DELAYS):
             self.mass.call_later(
                 delay, self._refresh_state, task_id=f"dlna_refresh_{index}_{self.player_id}"
