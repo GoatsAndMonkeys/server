@@ -118,6 +118,10 @@ if TYPE_CHECKING:
     from music_assistant.models.player import Player
 
 
+# an item that fails on the player again within this many seconds of being restarted after an
+# error is not restarted again
+ERROR_RESTART_COOLDOWN: Final = 60
+
 # the container media types worth surfacing as a queue "source" for clients to display. Individual
 # items (single tracks, radio streams, podcast episodes, live audio sources, ...) carry no grouping
 # and only clutter the "playing from" representation, so they are omitted from the wire `sources`.
@@ -1702,6 +1706,53 @@ class PlayerQueuesController(QueueLoaderMixin, PlaybackTrackerMixin, StreamFeede
         if queue_data is None or queue_data.session_id is None:
             return False
         return queue_data.flow_buffer_completed == queue_data.session_id
+
+    def restart_after_stream_error(self, queue_id: str) -> bool:
+        """
+        Restart the current item where it was, after the player dropped its stream on an error.
+
+        A Cast receiver that fails to decode the flow stream (MEDIA_DECODE, error 102) loads
+        the 'next' command item queued behind it by itself. That fetch must not skip the rest
+        of the track, so it is ignored for this session and the item is loaded again at its
+        position. Must be called before the player publishes its new (idle) state, while the
+        queue still holds the position it was playing at.
+
+        An item that fails again within a minute of such a restart is not restarted again,
+        so the player moving on to the next item is left alone.
+
+        :param queue_id: The queue whose player dropped the stream.
+        :return: Whether a restart was started.
+        """
+        queue_data = self.queue_data_or_none(queue_id)
+        if queue_data is None or (session_id := queue_data.session_id) is None:
+            return False
+        queue = queue_data.queue
+        if queue.state != PlaybackState.PLAYING or (item := queue.current_item) is None:
+            return False
+        now = time.time()
+        if (last := queue_data.last_error_restart) is not None and (
+            last[0] == item.queue_item_id and now - last[1] < ERROR_RESTART_COOLDOWN
+        ):
+            # it failed again right after a restart: let the player move on
+            self.logger.warning(
+                "%s failed again on %s, not restarting it", item.name, queue.display_name
+            )
+            return False
+        queue_data.last_error_restart = (item.queue_item_id, now)
+        queue_data.errored_session_id = session_id
+        position = int(queue.corrected_elapsed_time) if item.duration else 0
+        self.logger.info(
+            "Restarting %s at %s s on %s after a playback error",
+            item.name,
+            position,
+            queue.display_name,
+        )
+        self.mass.create_task(
+            self.play_index(queue_id, item.queue_item_id, seek_position=position),
+            task_id=f"queue_restart_after_error_{queue_id}",
+            task_name=f"queue_restart_after_error_{queue_id}",
+        )
+        return True
 
     def flow_queue_exhausted(self, queue_id: str, session_id: str) -> bool:
         """

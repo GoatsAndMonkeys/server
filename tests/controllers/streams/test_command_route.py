@@ -140,3 +140,21 @@ async def test_command_request_is_ignored_before_the_session_streamed(
     resp = await streams_controller.serve_command_request(_request("session-1"))
     assert isinstance(resp, web.FileResponse)
     create_task.assert_not_called()
+
+
+async def test_command_request_of_a_session_dropped_on_an_error_is_ignored(
+    streams_controller: StreamsController, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    The command item a Cast receiver loads by itself after a decode error is not a Next.
+
+    Regression test for https://github.com/music-assistant/support/issues/6512.
+    """
+    queue_data = _queue_data("session-1")
+    queue_data.errored_session_id = "session-1"
+    _mock_player_queues(streams_controller, queue_data)
+    create_task = MagicMock()
+    monkeypatch.setattr(streams_controller.mass, "create_task", create_task)
+    resp = await streams_controller.serve_command_request(_request("session-1"))
+    assert isinstance(resp, web.FileResponse)
+    create_task.assert_not_called()

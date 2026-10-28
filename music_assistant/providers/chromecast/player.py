@@ -107,6 +107,8 @@ class ChromecastPlayer(Player):
         self.flow_meta_checksum: str | None = None
         self._app_quit_task_id: str = f"cast_quit_app_{player_id}"
         self._media_error_reported = False
+        # whether the current media error incident was checked for a dropped stream
+        self._stream_error_handled = False
         # a volume set while idle, kept back until playback starts (see volume_set)
         self._pending_volume: int | None = None
         # set static variables
@@ -675,6 +677,10 @@ class ChromecastPlayer(Player):
             self._reset_to_idle()
             return
 
+        if group_player is None:
+            # before the idle state below is published: the queue must still hold the
+            # position the receiver was playing at
+            self._restart_after_stream_error(status)
         self._report_media_error(status, group_player)
 
         # pychromecast reports BUFFERING as 'playing', so a Cast group that underruns the
@@ -730,6 +736,30 @@ class ChromecastPlayer(Player):
             self.display_name,
             status.content_id or "the loaded media",
         )
+
+    def _restart_after_stream_error(self, status: MediaStatus) -> None:
+        """
+        Restart the interrupted item when the receiver drops MA's stream on an error.
+
+        A receiver that fails to decode the flow stream (MEDIA_DECODE, error 102) goes
+        IDLE/ERROR and loads the 'next' command item queued behind the stream by itself, so
+        its status then names that item. Without this the command fetch acts as a press on
+        Next and the rest of the track is skipped (support #6512), or, in the last track,
+        the queue jumps back to an earlier one (support #6658).
+
+        :param status: Media status as reported by the receiver.
+        """
+        if not (status.player_is_idle and status.idle_reason == "ERROR"):
+            self._stream_error_handled = False
+            return
+        if self._stream_error_handled or self._flow_stream_underrun():
+            return
+        self._stream_error_handled = True
+        command_url = self.mass.streams.get_command_url(self.player_id, "next")
+        if command_url is None or status.content_id != command_url:
+            return
+        if (queue := self.mass.players.get_active_queue(self)) is not None:
+            self.mass.player_queues.restart_after_stream_error(queue.queue_id)
 
     def _update_playback_state(self, status: MediaStatus, is_playing: bool) -> None:
         """

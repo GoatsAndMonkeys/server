@@ -1635,6 +1635,15 @@ class StreamsController(CoreController):
                 queue_id,
                 session_id,
             )
+        elif queue_data.errored_session_id == session_id:
+            # the player gave up on the stream and loaded the command item on its own;
+            # the queue restarts the interrupted item instead
+            self.logger.debug(
+                "Ignoring %s command for queue %s: the player dropped session %s on an error",
+                command,
+                queue_id,
+                session_id,
+            )
         elif command == "next":
             self.mass.create_task(self.mass.player_queues.next(queue_id))
         return web.FileResponse(SILENCE_FILE, headers={"icy-name": "Music Assistant"})

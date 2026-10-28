@@ -94,6 +94,12 @@ class PlayerQueueData:
     # queue_item_id of the item whose stream request was last accepted. Moves before any audio
     # goes out, so a slow item the player gave up on still vouches for the one after it
     last_requested_item_id: str | None = None
+    # session_id whose stream the player dropped on a playback error. The player moves on to
+    # the command item queued behind the stream by itself, which must not act as a user's Next
+    errored_session_id: str | None = None
+    # queue_item_id and time of the last restart after such an error, so an item that keeps
+    # failing is left behind instead of being restarted over and over
+    last_error_restart: tuple[str, float] | None = None
     # queue_item_ids whose audio reached the player during the current load, plus the item it
     # was still playing when that load started. The tracker only reports a play for, or ends the
     # queue on, one of these: a player can name an item it never received (one from its own
