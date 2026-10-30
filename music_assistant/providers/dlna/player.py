@@ -105,6 +105,7 @@ class DLNAPlayer(Player):
         self.bootid: int | None = None
         self.last_seen = time.time()
         self.last_command = time.time()
+        self._last_ping = time.time()
 
     def set_available(self, available: bool) -> None:
         """Set the availability of the player."""
@@ -385,10 +386,13 @@ class DLNAPlayer(Player):
 
         try:
             now = time.time()
-            do_ping = self.force_poll or (now - self.last_seen) > 60
+            # events keep last_seen fresh, but some devices send no TransportState event
+            # when a non-UPnP source takes over, so re-read the transport state regardless
+            do_ping = self.force_poll or (now - self._last_ping) > 60
             with suppress(ValueError, ParseError):
                 await self.device.async_update(do_ping=do_ping)
-            self.last_seen = now if do_ping else self.last_seen
+            if do_ping:
+                self.last_seen = self._last_ping = now
         except UpnpError as err:
             # Some devices (e.g. Denon HEOS) return SOAP responses containing
             # non-UTF-8 bytes in track metadata, which the underlying library
