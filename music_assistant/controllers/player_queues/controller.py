@@ -1169,7 +1169,7 @@ class PlayerQueuesController(QueueLoaderMixin, PlaybackTrackerMixin, StreamFeede
                             # the requested item is playable, its provider is just at capacity:
                             # report that instead of silently advancing to another item
                             self.logger.error("%s", load_err)
-                            await self.stop(queue_id)
+                            await self._end_failed_start(queue_id)
                             raise
                         err = load_err
                         attempts += 1
@@ -1193,7 +1193,7 @@ class PlayerQueuesController(QueueLoaderMixin, PlaybackTrackerMixin, StreamFeede
                     else:
                         msg = f"Playback failed for {queue_item.name} - no more tracks available"
                     self.logger.error(msg)
-                    await self.stop(queue_id)
+                    await self._end_failed_start(queue_id)
                     raise MediaNotFoundError(msg) from err
                 self.logger.warning(
                     "Skipping unplayable item %s: %s",
@@ -1202,7 +1202,7 @@ class PlayerQueuesController(QueueLoaderMixin, PlaybackTrackerMixin, StreamFeede
                 )
                 index = next_index
             if loaded_item is None:
-                await self.stop(queue_id)
+                await self._end_failed_start(queue_id)
                 raise MediaNotFoundError("No playable item found to start playback")
             queue_item = loaded_item
 
@@ -2089,11 +2089,13 @@ class PlayerQueuesController(QueueLoaderMixin, PlaybackTrackerMixin, StreamFeede
             raise InsufficientPermissions(msg)
 
     @handle_play_action
-    async def _handle_stop(self, queue_id: str) -> None:
+    async def _handle_stop(self, queue_id: str, stop_player: bool = True) -> None:
         """
         Handle stop without checking the caller's player permissions.
 
         :param queue_id: queue_id of the playerqueue to stop.
+        :param stop_player: Whether the player is told to stop as well. Without it only the
+            queue's playback session is torn down.
         """
         self._cancel_pending_playback(queue_id)
         if not (queue_data := self._queue_data.get(queue_id)):
@@ -2106,7 +2108,8 @@ class PlayerQueuesController(QueueLoaderMixin, PlaybackTrackerMixin, StreamFeede
             # Use internal handler to avoid circular redirect:
             # public cmd_stop redirects to queue.stop when a queue is active,
             # which would loop back here indefinitely.
-            await self.mass.players._handle_cmd_stop(queue_id)
+            if stop_player:
+                await self.mass.players._handle_cmd_stop(queue_id)
         finally:
             # a device that could not be reached still gets its session torn down: an
             # open session keeps the item buffers producing, which holds a provider's
@@ -2374,3 +2377,14 @@ class PlayerQueuesController(QueueLoaderMixin, PlaybackTrackerMixin, StreamFeede
         queue.elapsed_time = 0
         queue.elapsed_time_last_updated = time.time()
         queue.resume_pos = 0
+
+    async def _end_failed_start(self, queue_id: str) -> None:
+        """
+        End the playback session of a start that failed, and stop its player.
+
+        :param queue_id: queue_id of the playerqueue whose start failed.
+        """
+        player = self.mass.players.get_player(queue_id)
+        # a grouped player still plays its group's stream, which the failed start never replaced
+        in_group = player is not None and bool(player.state.active_group or player.state.synced_to)
+        await self._handle_stop(queue_id, stop_player=not in_group)
