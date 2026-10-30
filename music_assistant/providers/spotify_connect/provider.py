@@ -113,6 +113,10 @@ PLAYBACK_START_TIMEOUT_S = 3.0
 # _deferred_play_media_fire for why).
 PLAY_MEDIA_DEBOUNCE_S = 0.5
 
+# How long a stream teardown waits for the player to reconnect before releasing
+# the Spotify session (Sonos drops and reopens its first connection on startup).
+STREAM_RECONNECT_GRACE_S = 1.0
+
 # Ignore Spotify volume events for this long after a session becomes active, so
 # the player's own volume wins over the backend's initial value on (re)connect.
 INITIAL_VOLUME_GRACE_S = 3.0
@@ -524,6 +528,11 @@ class SpotifyConnectProvider(PluginProvider):
         if daemon.in_use_by_player == owner_player_id:
             daemon.in_use_by_player = None
         if daemon.playing:
+            # A player that drops its connection and reconnects claims the source
+            # again; releasing the session under it would deselect the device.
+            await asyncio.sleep(STREAM_RECONNECT_GRACE_S)
+            if not self._still_released(daemon):
+                return
             # MA-side stop/queue-clear: release the Spotify session so the app
             # drops the device as its playback target — the daemon would
             # otherwise keep playing into a pipe nobody consumes and the app
@@ -1256,3 +1265,13 @@ class SpotifyConnectProvider(PluginProvider):
         backend object exists.
         """
         return self.get_setup_value(CONF_BACKEND) == BACKEND_SOLOIST
+
+    def _still_released(self, daemon: _PlayerDaemon) -> bool:
+        """
+        Return whether the source is still unclaimed and Spotify still playing.
+
+        A separate call so the checks are re-read after an await.
+
+        :param daemon: The daemon whose stream was torn down.
+        """
+        return daemon.active_session_id is None and daemon.playing

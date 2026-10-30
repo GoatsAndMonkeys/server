@@ -498,6 +498,32 @@ async def test_stream_teardown_while_playing_releases_spotify() -> None:
     assert backend.calls == [("deactivate", None)]
 
 
+async def test_player_reconnect_during_teardown_keeps_spotify(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A player that drops its stream and reconnects at once keeps the Spotify session."""
+    monkeypatch.setattr(provider_mod, "STREAM_RECONNECT_GRACE_S", 0.05)
+    backend = FakeBackend()
+    provider, daemon, mass = _make_provider(
+        backend,
+        playing=True,
+        session_active=True,
+        active_player_id="queue1",
+        in_use_by_queue="queue1",
+        active_session_id="sess1",
+    )
+    _player_with_volume(mass, 25)
+
+    teardown = asyncio.create_task(provider.on_source_unselected(_PLAYER_ID, "queue1", "sess1"))
+    await asyncio.sleep(0)
+    await provider.on_source_selected(_PLAYER_ID, "queue1", "queue1", "sess2")
+    await teardown
+
+    assert ("deactivate", None) not in backend.calls
+    assert daemon.active_session_id == "sess2"
+    assert daemon.in_use_by_player == "queue1"
+
+
 async def test_stream_teardown_after_spotify_pause_does_not_pause_again() -> None:
     """A teardown that resulted from a Spotify-side pause sends no pause command."""
     backend = FakeBackend()
