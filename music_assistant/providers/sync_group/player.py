@@ -867,6 +867,11 @@ class SyncGroupPlayer(Player):
                 # the group was dissolved or re-led while we waited —
                 # this form attempt is stale, abort
                 return None
+        if await self._release_nested_members(leader):
+            if self.sync_leader is not leader:
+                return None
+            # the leader's compatibility list is otherwise refreshed only after a debounce
+            leader.update_state(force_update=True)
         # The leader is settled now, so its compatibility list is meaningful: drop the
         # members it can not play in sync with (e.g. one that joined while the leader
         # was still slaved and set_members had nothing to validate against). A leader
@@ -1726,3 +1731,32 @@ class SyncGroupPlayer(Player):
             if linked.protocol_domain == domain:
                 return self.mass.players.get_player(linked.output_protocol_id)
         return None
+
+    async def _release_nested_members(self, leader: Player) -> bool:
+        """
+        Ungroup the members that follow another member of this group natively.
+
+        The member they follow then leads a group of its own, and a playing group leader
+        is not on the sync leader's compatibility list, so the form would drop it.
+
+        :param leader: The settled sync leader of this group.
+        :return: True when at least one member was ungrouped.
+        """
+        released = False
+        for member_id in list(self._attr_group_members):
+            if member_id == leader.player_id:
+                continue
+            if (member := self.mass.players.get_player(member_id)) is None:
+                continue
+            sub_leader_id = member.state.synced_to
+            if (
+                sub_leader_id in (None, leader.player_id)
+                or sub_leader_id not in self._attr_group_members
+                or sub_leader_id in leader.state.can_group_with
+            ):
+                continue
+            await self.mass.players._auto_ungroup_if_synced(
+                member, f"joining {leader.display_name}"
+            )
+            released = True
+        return released

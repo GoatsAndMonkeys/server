@@ -2599,6 +2599,48 @@ class TestFormReconcilesIncompatibleMembers:
             leader, player_ids_to_add=["m2"], new_content=False
         )
 
+    @pytest.mark.asyncio
+    async def test_form_keeps_member_that_another_member_follows(self) -> None:
+        """
+        A member leading another member natively is kept: the follower is freed first.
+
+        After a leader switch, b can briefly lead c natively. A playing group leader is
+        not on the new leader's list, so b used to be dropped (support#6865).
+        """
+        mass = _make_mock_mass()
+        sgp = _make_sync_group(mass)
+        leader = _make_mock_player("a", provider_domain="sonos")
+        leader.state.can_group_with = {"c"}
+        sub_leader = _make_mock_player("b", provider_domain="sonos")
+        sub_leader.state.playback_state = PlaybackState.PLAYING
+        sub_leader.state.group_members = ["b", "c"]
+        follower = _make_mock_player("c", provider_domain="sonos")
+        follower.state.synced_to = "b"
+        mass.players.get_player = _player_lookup({"a": leader, "b": sub_leader, "c": follower})
+
+        async def _ungroup(player: MagicMock, _log_context: str) -> None:
+            player.state.synced_to = None
+            sub_leader.state.group_members = []
+
+        mass.players._auto_ungroup_if_synced = AsyncMock(side_effect=_ungroup)
+
+        def _refresh(**_kwargs: Any) -> None:
+            if not sub_leader.state.group_members:
+                leader.state.can_group_with = {"b", "c"}
+
+        leader.update_state = MagicMock(side_effect=_refresh)
+        sgp.sync_leader = leader
+        sgp._attr_group_members = ["a", "b", "c"]
+
+        with patch.object(sgp, "update_state"):
+            await sgp._form_syncgroup()
+
+        assert sgp._attr_group_members == ["a", "b", "c"]
+        mass.players._auto_ungroup_if_synced.assert_awaited_once()
+        mass.players._handle_set_members.assert_awaited_once_with(
+            leader, player_ids_to_add=["b", "c"], new_content=False
+        )
+
 
 class TestWaitMemberUnsynced:
     """The helper that waits for a member's synced_to to clear (with recovery)."""
