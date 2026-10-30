@@ -392,7 +392,7 @@ def test_format_ip_for_url() -> None:
     [
         ("192.168.1.64", False),
         ("::ffff:192.168.1.64", False),
-        ("fdec:7249:300f:4622:9256:82ff:fe41:be04", True),
+        ("fd12:3456:789a:1:211:22ff:fe33:4455", True),
         ("::1", True),
         ("not-an-ip", False),
     ],

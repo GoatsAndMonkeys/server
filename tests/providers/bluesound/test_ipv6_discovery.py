@@ -27,9 +27,9 @@ from music_assistant.providers.bluesound.provider import (
 SERVICE_TYPE = "_musc._tcp.local."
 SERVICE_NAME = f"Kitchen.{SERVICE_TYPE}"
 ZONE_SERVICE_NAME = f"Kitchen-2.{MUSP_MDNS_TYPE}"
-MAC = "90:56:82:41:be:04"
-IPV4 = "192.168.13.229"
-IPV6_ULA = "fdec:7249:300f:4622:9256:82ff:fe41:be04"
+MAC = "00:11:22:33:44:55"
+IPV4 = "192.168.1.64"
+IPV6_ULA = "fd12:3456:789a:1:211:22ff:fe33:4455"
 PROVIDER_MODULE = "music_assistant.providers.bluesound.provider"
 
 
@@ -100,7 +100,7 @@ async def test_ipv6_only_zone_reannouncement_keeps_the_known_zone(
 
 @pytest.mark.parametrize(
     ("known_address", "announced"),
-    [(IPV4, ("192.168.13.230",)), (IPV6_ULA, (IPV4, IPV6_ULA)), (IPV6_ULA, ("fdec::2",))],
+    [(IPV4, ("192.168.1.65",)), (IPV6_ULA, (IPV4, IPV6_ULA)), (IPV6_ULA, ("fd12:3456:789a:1::2",))],
 )
 async def test_changed_address_sets_up_the_player_again(
     new_player: MagicMock, known_address: str, announced: tuple[str, ...]

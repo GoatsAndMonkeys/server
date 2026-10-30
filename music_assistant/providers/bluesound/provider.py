@@ -66,9 +66,8 @@ class BluesoundPlayerProvider(PlayerProvider):
         player_id: str | None
         mac_address: str | None
         if info.type == MUSP_MDNS_TYPE:
-            # this is a multi-zone device, we need to fetch the mac address of the main device.
-            # That lookup only works over IPv4, so an IPv6-only announcement of a known zone
-            # reuses the mac address found for it before.
+            # this is a multi-zone device, we need to fetch the mac address of the main device
+            # The lookup needs IPv4, so an IPv6-only announcement reuses the zone's known mac
             if is_ipv6_address(ip_address):
                 mac_address = self._zone_macs.get(info.name)
             else:
@@ -91,13 +90,11 @@ class BluesoundPlayerProvider(PlayerProvider):
             self._zone_macs[info.name] = mac_address
         if bluos_player := self.mass.players.get_player(player_id):
             bluos_player = cast("BluesoundPlayer", bluos_player)
-            # An announcement that only carries an IPv6 address (e.g. while the device
-            # re-announces after a network blip) does not move a player known at an IPv4
-            # address: BluOS groups players by their IPv4 address.
+            # An IPv6-only re-announcement keeps the player at its IPv4 address,
+            # which BluOS uses for grouping
             if ip_address == bluos_player.ip_address or (
                 is_ipv6_address(ip_address) and not is_ipv6_address(bluos_player.ip_address)
             ):
-                # Refresh the player at the address it already has
                 bluos_player._attr_available = True
                 await bluos_player.update_attributes()
                 if bluos_player._attr_available:
